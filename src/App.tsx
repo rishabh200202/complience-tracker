@@ -47,8 +47,21 @@ const FY_MONTHS = [
   'Mar',
 ];
 const CURRENT_FY = 2026;
-const CURRENT_MONTH = 'Jun';
-
+const GST_FILING_MONTH = PREVIOUS_MONTH[CURRENT_MONTH];
+const PREVIOUS_MONTH = {
+  Apr: "Mar",
+  May: "Apr",
+  Jun: "May",
+  Jul: "Jun",
+  Aug: "Jul",
+  Sep: "Aug",
+  Oct: "Sep",
+  Nov: "Oct",
+  Dec: "Nov",
+  Jan: "Dec",
+  Feb: "Jan",
+  Mar: "Feb"
+};
 const STATUSES: Record<string, any> = {
   pending: {
     label: 'Pending',
