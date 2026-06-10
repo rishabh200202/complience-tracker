@@ -265,7 +265,7 @@ function Nav({ tab, setTab, userEmail }: any) {
         <span style={{fontSize:22}}>🏛️</span>
         <div>
           <div style={{lineHeight:1.2}}>Compliance Tracker</div>
-          <div style={{fontSize:9,fontWeight:400,opacity:.4,letterSpacing:1}}>SS &amp; CO.</div>
+          <div style={{fontSize:9,fontWeight:400,opacity:.4,letterSpacing:1}}>Sanket Salecha &amp; CO.</div>
         </div>
       </div>
       {items.map((it)=>(
