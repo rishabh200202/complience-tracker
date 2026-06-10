@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import * as XLSX from 'xlsx';
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
@@ -44,11 +45,7 @@ const DEFAULTS = {
   bookkeepingClients:   ["Resonics AI","Arion Analytics","Swichh"],
   teamMembers:          ["Rishabh"],
   bookkeepingTasks:     ["Bank reconciliation","Purchase entries","Sales entries","Expense entries","Payroll entries","Depreciation entry","GST Reconciliation","Month-end closing"],
-  adminEmails:          ["ssandco.rishabhrai@gmail.com"],
 };
-
-const STARTUP_CLIENTS = ["Resonics AI","Arion Analytics","Swichh"];
-const PT_CLIENTS      = ["Sanket Salecha & Co."];
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 function mkKey(fy: number, m: string): string {
@@ -84,21 +81,11 @@ function gstFilingLabel(fy: number, calendarMonth: string): string {
 
 const fyL         = (fy: number) => `FY ${fy}-${String(fy+1).slice(-2)}`;
 const dc          = (o: any)    => JSON.parse(JSON.stringify(o));
+// Tracker starts Jun 2026 — hide Apr & May for FY 2026
+const getAvailableMonths = (fy: number): string[] =>
+  fy === 2026 ? FY_MONTHS.slice(2) : FY_MONTHS; // slice(2) = Jun onwards
 const sanitizeKey = (n: string) => n.replace(/\./g,"").replace(/\s+/g,"_").replace(/&/g,"and");
 
-// ── Default portal list per client ────────────────────────────────────────
-function getDefaultPortals(clientName: string) {
-  const base = [
-    { id:"gst",  name:"GST Portal",   url:"https://gst.gov.in",          username:"", password:"", notes:"" },
-    { id:"it",   name:"Income Tax",   url:"https://incometax.gov.in",     username:"", password:"", notes:"" },
-    { id:"mca",  name:"MCA Portal",   url:"https://mca.gov.in",           username:"", password:"", notes:"" },
-  ];
-  if (STARTUP_CLIENTS.includes(clientName))
-    base.push({ id:"startup", name:"Startup India", url:"https://startupindia.gov.in", username:"", password:"", notes:"" });
-  if (PT_CLIENTS.includes(clientName))
-    base.push({ id:"pt", name:"Professional Tax", url:"", username:"", password:"", notes:"" });
-  return base;
-}
 
 // ── Firebase write helpers ────────────────────────────────────────────────
 async function fbSaveSettings(data: any) {
@@ -113,11 +100,6 @@ async function fbWriteBk(mk: string, client: string, task: string, upd: any) {
   const ref = doc(db,"tracker","bk");
   try { await updateDoc(ref, {[`${mk}.${client}.${task}`]:upd}); }
   catch { await setDoc(ref, {[mk]:{[client]:{[task]:upd}}}, {merge:true}); }
-}
-async function fbWriteVault(clientKey: string, data: any) {
-  const ref = doc(db,"tracker","vault");
-  try { await updateDoc(ref, {[clientKey]:data}); }
-  catch { await setDoc(ref, {[clientKey]:data}, {merge:true}); }
 }
 
 // ── Shared UI ─────────────────────────────────────────────────────────────
@@ -228,7 +210,7 @@ function LoginScreen() {
         <div style={{textAlign:"center",marginBottom:32}}>
           <div style={{fontSize:44,marginBottom:12}}>🏛️</div>
           <h1 style={{margin:0,fontSize:22,fontWeight:800,color:"#0F172A"}}>Compliance Tracker</h1>
-          <p style={{margin:"6px 0 0",color:"#64748B",fontSize:13}}>Sanket Salecha &amp; Co. — Please sign in</p>
+          <p style={{margin:"6px 0 0",color:"#64748B",fontSize:13}}>SS &amp; Co. — Please sign in</p>
         </div>
         {error&&<div style={{background:"#FEF2F2",color:"#DC2626",padding:"10px 14px",borderRadius:9,marginBottom:16,fontSize:13,border:"1px solid #FECACA"}}>{error}</div>}
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
@@ -256,7 +238,6 @@ function Nav({ tab, setTab, userEmail }: any) {
     {id:"dashboard",   icon:"📊",label:"Dashboard"},
     {id:"gst",         icon:"📋",label:"GST Filings"},
     {id:"bookkeeping", icon:"📒",label:"Bookkeeping"},
-    {id:"vault",       icon:"🔐",label:"Client Vault"},
     {id:"settings",    icon:"⚙️",label:"Settings"},
   ];
   return (
@@ -265,7 +246,7 @@ function Nav({ tab, setTab, userEmail }: any) {
         <span style={{fontSize:22}}>🏛️</span>
         <div>
           <div style={{lineHeight:1.2}}>Compliance Tracker</div>
-          <div style={{fontSize:9,fontWeight:400,opacity:.4,letterSpacing:1}}>Sanket Salecha &amp; CO.</div>
+          <div style={{fontSize:9,fontWeight:400,opacity:.4,letterSpacing:1}}>Sanket Salecha &amp; Co.</div>
         </div>
       </div>
       {items.map((it)=>(
@@ -289,7 +270,7 @@ function MonthBar({ month, setMonth, fy, setFy }: any) {
   return (
     <div style={{background:"#162d50",borderBottom:"1px solid rgba(255,255,255,0.07)",padding:"0 24px",display:"flex",alignItems:"center",overflowX:"auto"}}>
       <select value={fy} onChange={(e)=>setFy(Number(e.target.value))} style={{background:"rgba(255,255,255,0.1)",color:"white",border:"1px solid rgba(255,255,255,0.15)",borderRadius:6,padding:"3px 8px",fontSize:11,marginRight:14,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
-        {[2024,2025,2026,2027].map((y)=><option key={y} value={y} style={{background:"#162d50"}}>{fyL(y)}</option>)}
+        {[2026,2027,2028,2029,2030].map((y)=><option key={y} value={y} style={{background:"#162d50"}}>{fyL(y)}</option>)}
       </select>
       {FY_MONTHS.map((m)=>{
         const isCur=m===CURRENT_MONTH&&fy===CURRENT_FY, isSel=m===month;
@@ -303,8 +284,206 @@ function MonthBar({ month, setMonth, fy, setFy }: any) {
   );
 }
 
+// ── Export Helpers ────────────────────────────────────────────────────────
+function getMonthsInRange(startFY:number, startMonth:string, endFY:number, endMonth:string) {
+  const result: any[] = [];
+  let curFY = startFY;
+  let curIdx = FY_MONTHS.indexOf(startMonth);
+  const endIdx = FY_MONTHS.indexOf(endMonth);
+  for (let safety = 0; safety < 60; safety++) {
+    const m = FY_MONTHS[curIdx];
+    const calYear = curIdx <= 8 ? curFY : curFY + 1;
+    const calMonthNum = [4,5,6,7,8,9,10,11,12,1,2,3][curIdx];
+    const bkMk = `${calYear}-${String(calMonthNum).padStart(2,'0')}`;
+    result.push({ label:`${m} ${calYear}`, month:m, fy:curFY, bkMk, gstMk:gstFilingMk(curFY,m), filingLabel:gstFilingLabel(curFY,m) });
+    if (curFY===endFY && curIdx===endIdx) break;
+    curIdx++;
+    if (curIdx>=12) { curIdx=0; curFY++; }
+    if (curFY>endFY+1) break;
+  }
+  return result;
+}
+
+function doExport(settings:any, gstData:any, bkData:any, months:any[]) {
+  const capitalize = (s:string) => s.charAt(0).toUpperCase()+s.slice(1);
+  const statusLabel = (s:string) => ({ done:'Done', in_progress:'In Progress', na:'N/A', pending:'Pending' }[s]||'Pending');
+  const periodFrom = months[0]?.label || '';
+  const periodTo   = months[months.length-1]?.label || '';
+  const wb = XLSX.utils.book_new();
+
+  // ── Summary sheet ──────────────────────────────────────────────
+  const sumRows:any[][] = [
+    ['Sanket Salecha & Co. — Compliance Tracker'],
+    [`Period: ${periodFrom} to ${periodTo}`],
+    [`Generated: ${new Date().toLocaleDateString('en-IN')}`],
+    [],
+    ['CLIENT','TYPE',...months.map(m=>m.label),'TOTAL'],
+  ];
+  settings.gstClients.forEach((c:string)=>{
+    let done=0;
+    const row=[c,'GST'];
+    months.forEach(m=>{
+      const s1=gstData[m.gstMk]?.[c]?.['GSTR-1']?.status||'pending';
+      const s3=gstData[m.gstMk]?.[c]?.['GSTR-3B']?.status||'pending';
+      const both=s1==='done'&&s3==='done';
+      row.push(both?'Done':(['done','in_progress'].includes(s1)||['done','in_progress'].includes(s3))?'Partial':s1==='na'&&s3==='na'?'N/A':'Pending');
+      if(both) done++;
+    });
+    const gstTotal=months.filter(m=>{const s1=gstData[m.gstMk]?.[c]?.['GSTR-1']?.status||'pending';const s3=gstData[m.gstMk]?.[c]?.['GSTR-3B']?.status||'pending';return!(s1==='na'&&s3==='na');}).length;
+    row.push(`${done}/${gstTotal}`);
+    sumRows.push(row);
+  });
+  sumRows.push([]);
+  settings.bookkeepingClients.forEach((c:string)=>{
+    let td=0,tt=0;
+    const row=[c,'Bookkeeping'];
+    months.forEach(m=>{
+      const d=settings.bookkeepingTasks.filter((t:string)=>bkData[m.bkMk]?.[c]?.[t]?.status==='done').length;
+      const tot=settings.bookkeepingTasks.length;
+      row.push(`${d}/${tot}`); td+=d; tt+=tot;
+    });
+    row.push(`${td}/${tt}`);
+    sumRows.push(row);
+  });
+  const sumWs=XLSX.utils.aoa_to_sheet(sumRows);
+  sumWs['!cols']=[{wch:28},{wch:14},...months.map(()=>({wch:12})),{wch:10}];
+  XLSX.utils.book_append_sheet(wb,sumWs,'Summary');
+
+  // ── GST Filings sheet ──────────────────────────────────────────
+  const gstHdr=['CLIENT',...months.flatMap(m=>[`${m.filingLabel}\nGSTR-1`,`GSTR-1 By`,`GSTR-3B`,`GSTR-3B By`])];
+  const gstRows:any[][]=[
+    ['Sanket Salecha & Co. — GST Filings'],
+    [`Period: ${periodFrom} to ${periodTo} (returns filed in each calendar month)`],
+    [],
+    gstHdr,
+  ];
+  settings.gstClients.forEach((c:string)=>{
+    const row=[c];
+    months.forEach(m=>{
+      const e1=gstData[m.gstMk]?.[c]?.['GSTR-1']||{};
+      const e3=gstData[m.gstMk]?.[c]?.['GSTR-3B']||{};
+      row.push(statusLabel(e1.status||'pending'),e1.by||'',statusLabel(e3.status||'pending'),e3.by||'');
+    });
+    gstRows.push(row);
+  });
+  const gstWs=XLSX.utils.aoa_to_sheet(gstRows);
+  gstWs['!cols']=[{wch:28},...months.flatMap(()=>[{wch:14},{wch:12},{wch:14},{wch:12}])];
+  XLSX.utils.book_append_sheet(wb,gstWs,'GST Filings');
+
+  // ── Bookkeeping sheet ──────────────────────────────────────────
+  const bkRows:any[][]=[
+    ['Sanket Salecha & Co. — Bookkeeping Closing'],
+    [`Period: ${periodFrom} to ${periodTo}`],
+    [],
+    ['CLIENT','TASK',...months.map(m=>m.label),'DONE'],
+  ];
+  settings.bookkeepingClients.forEach((c:string)=>{
+    settings.bookkeepingTasks.forEach((task:string,ti:number)=>{
+      let done=0;
+      const row=[ti===0?c:'',task];
+      months.forEach(m=>{
+        const e=bkData[m.bkMk]?.[c]?.[task]||{};
+        row.push(statusLabel(e.status||'pending')+(e.by?` (${e.by})`:''));
+        if(e.status==='done') done++;
+      });
+      row.push(`${done}/${months.length}`);
+      bkRows.push(row);
+    });
+    bkRows.push([]);
+  });
+  const bkWs=XLSX.utils.aoa_to_sheet(bkRows);
+  bkWs['!cols']=[{wch:28},{wch:26},...months.map(()=>({wch:16})),{wch:10}];
+  XLSX.utils.book_append_sheet(wb,bkWs,'Bookkeeping');
+
+  XLSX.writeFile(wb,`SanketSalechaAndCo_Compliance_${periodFrom.replace(' ','_')}_to_${periodTo.replace(' ','_')}.xlsx`);
+}
+
+// ── Export Modal ──────────────────────────────────────────────────────────
+function ExportModal({ settings, gstData, bkData, onClose }: any) {
+  const [startFY,    setStartFY]    = useState(CURRENT_FY);
+  const [startMonth, setStartMonth] = useState('Jun');
+  const [endFY,      setEndFY]      = useState(CURRENT_FY);
+  const [endMonth,   setEndMonth]   = useState(CURRENT_MONTH);
+  const [exporting,  setExporting]  = useState(false);
+  const [error,      setError]      = useState('');
+
+  const months = getMonthsInRange(startFY, startMonth, endFY, endMonth);
+  const valid  = months.length > 0 && months.length <= 36;
+
+  const handleExport = () => {
+    if (!valid) { setError('Invalid date range — make sure From is before To.'); return; }
+    setExporting(true); setError('');
+    try { doExport(settings, gstData, bkData, months); }
+    catch(e) { setError('Export failed. Make sure xlsx is installed (npm install xlsx).'); }
+    setExporting(false);
+    onClose();
+  };
+
+  const selStyle = { padding:'8px 10px', borderRadius:8, border:'1.5px solid #E2E8F0', fontSize:13, fontFamily:'inherit', outline:'none', background:'white', cursor:'pointer' };
+  const lbl = { fontSize:11, fontWeight:700 as const, color:'#94A3B8' as const, letterSpacing:.8, marginBottom:6, display:'block' as const, textTransform:'uppercase' as const };
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={onClose}>
+      <div style={{background:'white',borderRadius:16,padding:32,width:500,boxShadow:'0 24px 64px rgba(0,0,0,0.25)'}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:6}}>
+          <span style={{fontSize:28}}>📊</span>
+          <h2 style={{margin:0,fontSize:18,fontWeight:800,color:'#0F172A'}}>Export to Excel</h2>
+        </div>
+        <p style={{margin:'0 0 24px',color:'#64748B',fontSize:13}}>Select a period to export. Generates 3 sheets: Summary, GST Filings, Bookkeeping.</p>
+
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,marginBottom:20}}>
+          <div>
+            <label style={lbl}>From</label>
+            <div style={{display:'flex',gap:8}}>
+              <select value={startMonth} onChange={e=>setStartMonth(e.target.value)} style={{...selStyle,flex:1}}>
+                {FY_MONTHS.map(m=><option key={m} value={m}>{m}</option>)}
+              </select>
+              <select value={startFY} onChange={e=>setStartFY(Number(e.target.value))} style={{...selStyle,flex:1}}>
+                {[2026,2027,2028,2029,2030].map(y=><option key={y} value={y}>{fyL(y)}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label style={lbl}>To</label>
+            <div style={{display:'flex',gap:8}}>
+              <select value={endMonth} onChange={e=>setEndMonth(e.target.value)} style={{...selStyle,flex:1}}>
+                {FY_MONTHS.map(m=><option key={m} value={m}>{m}</option>)}
+              </select>
+              <select value={endFY} onChange={e=>setEndFY(Number(e.target.value))} style={{...selStyle,flex:1}}>
+                {[2026,2027,2028,2029,2030].map(y=><option key={y} value={y}>{fyL(y)}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div style={{background:'#F8FAFC',borderRadius:10,padding:'12px 16px',marginBottom:20,fontSize:12,color:'#64748B',border:'1px solid #E2E8F0'}}>
+          {valid ? (
+            <>
+              <span style={{color:'#166534',fontWeight:700}}>✓ {months.length} month{months.length!==1?'s':''}</span>
+              {' · '}{months[0]?.label} → {months[months.length-1]?.label}
+              <br/>
+              <span style={{fontSize:11}}>Includes {settings.gstClients?.length} GST clients · {settings.bookkeepingClients?.length} BK clients · {settings.bookkeepingTasks?.length} tasks</span>
+            </>
+          ) : <span style={{color:'#EF4444'}}>⚠ Invalid range — From must be before To</span>}
+        </div>
+
+        {error && <div style={{background:'#FEF2F2',color:'#DC2626',padding:'10px 14px',borderRadius:9,marginBottom:16,fontSize:13,border:'1px solid #FECACA'}}>{error}</div>}
+
+        <div style={{display:'flex',gap:10}}>
+          <button onClick={onClose} style={{flex:1,padding:'10px',borderRadius:10,border:'1.5px solid #E2E8F0',background:'white',cursor:'pointer',fontSize:13,fontFamily:'inherit',color:'#374151'}}>
+            Cancel
+          </button>
+          <button onClick={handleExport} disabled={!valid||exporting} style={{flex:2,padding:'10px',borderRadius:10,border:'none',background:!valid||exporting?'#93C5FD':'#2563EB',color:'white',fontWeight:700,fontSize:13,cursor:!valid||exporting?'default':'pointer',fontFamily:'inherit'}}>
+            {exporting?'Generating…':'⬇️ Download Excel'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Dashboard ─────────────────────────────────────────────────────────────
-function Dashboard({ settings, gstData, bkData, fy, onNavigate }: any) {
+function Dashboard({ settings, gstData, bkData, fy, onNavigate, onExport }: any) {
   const {gstClients,bookkeepingClients,bookkeepingTasks} = settings;
 
   // GST done count: uses FILING PERIOD of current calendar month
@@ -312,13 +491,15 @@ function Dashboard({ settings, gstData, bkData, fy, onNavigate }: any) {
   const gstPeriodLbl = gstFilingLabel(fy, CURRENT_MONTH);   // "May 2026"
   const doneGst  = gstClients.reduce((a:number,c:string)=>
     a+["GSTR-1","GSTR-3B"].filter((f)=>gstData[gstCurrMk]?.[c]?.[f]?.status==="done").length, 0);
-  const totalGst = gstClients.length*2;
+  const totalGst = gstClients.reduce((a:number,c:string)=>
+    a+["GSTR-1","GSTR-3B"].filter((f)=>(gstData[gstCurrMk]?.[c]?.[f]?.status||"pending")!=="na").length, 0);
 
   // BK done count: uses current calendar month key
   const bkCurrMk = mkKey(fy, CURRENT_MONTH);
   const doneBk   = bookkeepingClients.reduce((a:number,c:string)=>
     a+bookkeepingTasks.filter((t:string)=>bkData[bkCurrMk]?.[c]?.[t]?.status==="done").length, 0);
-  const totalBk  = bookkeepingClients.length*bookkeepingTasks.length;
+  const totalBk  = bookkeepingClients.reduce((a:number,c:string)=>
+    a+bookkeepingTasks.filter((t:string)=>(bkData[bkCurrMk]?.[c]?.[t]?.status||"pending")!=="na").length, 0);
 
   // GST heat map: for each calendar month, look up the FILING PERIOD data
   const gstCell = (client:string, calMonth:string) => {
@@ -333,7 +514,9 @@ function Dashboard({ settings, gstData, bkData, fy, onNavigate }: any) {
 
   const bkProg = (client:string, m:string) => {
     const mk = mkKey(fy,m);
-    return { done:bookkeepingTasks.filter((t:string)=>bkData[mk]?.[client]?.[t]?.status==="done").length, total:bookkeepingTasks.length };
+    const done  = bookkeepingTasks.filter((t:string)=>bkData[mk]?.[client]?.[t]?.status==="done").length;
+    const total = bookkeepingTasks.filter((t:string)=>(bkData[mk]?.[client]?.[t]?.status||"pending")!=="na").length;
+    return { done, total };
   };
 
   const HeatCell = ({status}:any)=>{
@@ -473,7 +656,8 @@ function GSTTab({ settings, gstData, month, fy, setPopover }: any) {
 
   const doneCount = gstClients.reduce((a:number,c:string)=>
     a+FILINGS.filter((f)=>getE(c,f).status==="done").length, 0);
-  const total = gstClients.length*FILINGS.length;
+  const total = gstClients.reduce((a:number,c:string)=>
+    a+FILINGS.filter((f)=>(getE(c,f).status||"pending")!=="na").length, 0);
 
   return (
     <div>
@@ -504,17 +688,17 @@ function GSTTab({ settings, gstData, month, fy, setPopover }: any) {
               const allDone=FILINGS.every((f)=>getE(client,f).status==="done");
               const anyProg=FILINGS.some((f)=>["done","in_progress"].includes(getE(client,f).status));
               return (
-                <div key={client} style={{background:"white",borderRadius:14,padding:"16px 22px",border:allDone?"1.5px solid #86EFAC":"1px solid #E2E8F0",boxShadow:"0 1px 3px rgba(0,0,0,0.06)",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                <div key={client} style={{background:"white",borderRadius:14,padding:"16px 22px",border:allDone?"1.5px solid #86EFAC":"1px solid #E2E8F0",boxShadow:"0 1px 3px rgba(0,0,0,0.06)",display:"flex",alignItems:"center",gap:14}}>
                   <div style={{width:32,height:32,borderRadius:10,flexShrink:0,background:allDone?"#DCFCE7":anyProg?"#DBEAFE":"#F1F5F9",color:allDone?"#166534":anyProg?"#1D4ED8":"#94A3B8",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:800}}>{allDone?"✓":i+1}</div>
                   <div style={{flex:1,minWidth:140}}>
                     <div style={{fontWeight:700,color:"#0F172A",fontSize:14}}>{client}</div>
                     {allDone&&<div style={{fontSize:11,color:"#16A34A",marginTop:1}}>All {periodLbl} filings complete ✓</div>}
                   </div>
-                  <div style={{display:"flex",gap:20,flexWrap:"wrap"}}>
+                  <div style={{display:"flex",gap:16,flexShrink:0}}>
                     {FILINGS.map((f)=>{
                       const e=getE(client,f);
                       return (
-                        <div key={f} style={{display:"flex",flexDirection:"column",gap:4,alignItems:"center"}}>
+                        <div key={f} style={{display:"flex",flexDirection:"column",gap:4,alignItems:"center",minWidth:145}}>
                           <span style={{fontSize:10,fontWeight:700,color:"#94A3B8",letterSpacing:.5}}>{f}</span>
                           <Badge status={e.status||"pending"} by={e.by} onClick={(ev:any)=>openPicker(ev,client,f)}/>
                         </div>
@@ -541,7 +725,8 @@ function BKTab({ settings, bkData, mk, month, setPopover }: any) {
   const openPicker=(e:any,client:string,task:string)=>{e.stopPropagation();const entry=getE(client,task);const rect=e.currentTarget.getBoundingClientRect();setPopover({rect,status:entry.status||"pending",by:entry.by||"",onSave:(u:any)=>fbWriteBk(mk,client,task,u)});};
   const toggle=(c:string)=>setExpanded((p:any)=>{const s=new Set(p);s.has(c)?s.delete(c):s.add(c);return s;});
   const markAll=(client:string,who:string)=>{bookkeepingTasks.forEach((t:string)=>{if(!["done","na"].includes(getE(client,t).status))fbWriteBk(mk,client,t,{status:"done",by:who});});setQc(null);setQWho("");};
-  const totalAll=bookkeepingClients.length*bookkeepingTasks.length;
+  const totalAll=bookkeepingClients.reduce((a:number,c:string)=>
+    a+bookkeepingTasks.filter((t:string)=>(getE(c,t).status||"pending")!=="na").length,0);
   const doneAll=bookkeepingClients.reduce((a:number,c:string)=>a+bookkeepingTasks.filter((t:string)=>getE(c,t).status==="done").length,0);
   return (
     <div>
@@ -559,7 +744,8 @@ function BKTab({ settings, bkData, mk, month, setPopover }: any) {
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
           {bookkeepingClients.map((client:string)=>{
             const done=bookkeepingTasks.filter((t:string)=>getE(client,t).status==="done").length;
-            const total=bookkeepingTasks.length,allDone=done===total,isOpen=expanded.has(client);
+            const total=bookkeepingTasks.filter((t:string)=>(getE(client,t).status||"pending")!=="na").length;
+            const allDone=done===total&&total>0,isOpen=expanded.has(client);
             return (
               <div key={client} style={{background:"white",borderRadius:14,border:allDone?"1.5px solid #86EFAC":"1px solid #E2E8F0",boxShadow:"0 1px 3px rgba(0,0,0,0.06)",overflow:"hidden"}}>
                 <div style={{padding:"14px 20px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",background:allDone?"#F9FFFE":"white",borderBottom:isOpen?"1px solid #F1F5F9":"none"}} onClick={()=>toggle(client)}>
@@ -592,266 +778,6 @@ function BKTab({ settings, bkData, mk, month, setPopover }: any) {
   );
 }
 
-// ── Client Vault ──────────────────────────────────────────────────────────
-function ClientVaultTab({ settings, vaultData, isAdmin }: any) {
-  const allClients = [...new Set([...settings.gstClients,...settings.bookkeepingClients])] as string[];
-  const [selected,    setSelected]    = useState(allClients[0]||"");
-  const [localData,   setLocalData]   = useState<any>(null);
-  const [editMode,    setEditMode]    = useState(false);
-  const [showPwd,     setShowPwd]     = useState<Record<string,boolean>>({});
-  const [saving,      setSaving]      = useState(false);
-  const [savedMsg,    setSavedMsg]    = useState(false);
-  const [addingPortal,setAddingPortal]= useState(false);
-  const [newPortal,   setNewPortal]   = useState({name:"",url:"",username:"",password:"",notes:""});
-  const [copied,      setCopied]      = useState<string|null>(null);
-
-  // Load data for selected client
-  useEffect(()=>{
-    const existing = vaultData[sanitizeKey(selected)];
-    setLocalData(existing ? dc(existing) : {
-      contact:{gstin:"",pan:"",contactPerson:"",phone:"",email:""},
-      portals:getDefaultPortals(selected)
-    });
-    setEditMode(false); setShowPwd({}); setAddingPortal(false);
-  },[selected,vaultData]);
-
-  const handleSave = async () => {
-    setSaving(true);
-    await fbWriteVault(sanitizeKey(selected), localData);
-    setSaving(false); setSavedMsg(true); setTimeout(()=>setSavedMsg(false),2000);
-    setEditMode(false); setAddingPortal(false);
-  };
-
-  const handleCancel = () => {
-    const existing = vaultData[sanitizeKey(selected)];
-    setLocalData(existing ? dc(existing) : {
-      contact:{gstin:"",pan:"",contactPerson:"",phone:"",email:""},
-      portals:getDefaultPortals(selected)
-    });
-    setEditMode(false); setAddingPortal(false);
-  };
-
-  const updateContact = (field:string, val:string) =>
-    setLocalData((p:any)=>({...p,contact:{...p.contact,[field]:val}}));
-
-  const updatePortal = (i:number, field:string, val:string) => {
-    const portals = dc(localData.portals);
-    portals[i][field] = val;
-    setLocalData((p:any)=>({...p,portals}));
-  };
-
-  const removePortal = (i:number) =>
-    setLocalData((p:any)=>({...p,portals:p.portals.filter((_:any,j:number)=>j!==i)}));
-
-  const addPortal = () => {
-    if(!newPortal.name.trim()) return;
-    setLocalData((p:any)=>({...p,portals:[...p.portals,{...newPortal,id:Date.now().toString()}]}));
-    setNewPortal({name:"",url:"",username:"",password:"",notes:""});
-    setAddingPortal(false);
-  };
-
-  const togglePwd = (id:string) => setShowPwd(p=>({...p,[id]:!p[id]}));
-
-  const copyText = (text:string, id:string) => {
-    navigator.clipboard.writeText(text).catch(()=>{});
-    setCopied(id); setTimeout(()=>setCopied(null),1500);
-  };
-
-  const inp  = (extra?:any) => ({width:"100%",padding:"8px 12px",borderRadius:8,border:"1.5px solid #E2E8F0",fontSize:13,fontFamily:"inherit",outline:"none",background:"white",boxSizing:"border-box" as const,...(extra||{})});
-  const lbl  = {fontSize:10,fontWeight:700 as const,color:"#94A3B8" as const,letterSpacing:.8,marginBottom:4,display:"block" as const,textTransform:"uppercase" as const};
-  const btn  = (bg:string,fg:string="white") => ({padding:"7px 16px",borderRadius:8,border:"none",background:bg,color:fg,fontWeight:700 as const,fontSize:12,cursor:"pointer" as const,fontFamily:"inherit"});
-
-  if(!localData) return null;
-
-  const contactFields = [
-    {key:"gstin",label:"GSTIN"},{key:"pan",label:"PAN"},
-    {key:"contactPerson",label:"Contact Person"},
-    {key:"phone",label:"Phone"},{key:"email",label:"Email"},
-  ];
-
-  return (
-    <div>
-      <div style={{marginBottom:20}}>
-        <h1 style={{margin:0,fontSize:22,fontWeight:800,color:"#0F172A"}}>🔐 Client Vault</h1>
-        <p style={{margin:"4px 0 0",color:"#64748B",fontSize:13}}>
-          Contact details &amp; portal credentials · Synced via Firebase
-          {!isAdmin&&<span style={{color:"#EF4444"}}> · View only — contact admin to edit</span>}
-        </p>
-      </div>
-
-      <div style={{display:"grid",gridTemplateColumns:"220px 1fr",gap:20,alignItems:"start"}}>
-
-        {/* Client list */}
-        <div style={{display:"flex",flexDirection:"column",gap:5}}>
-          {allClients.map((c)=>{
-            const hasSaved = !!vaultData[sanitizeKey(c)];
-            const isSel    = selected===c;
-            return (
-              <button key={c} onClick={()=>setSelected(c)} style={{display:"flex",alignItems:"center",gap:8,padding:"11px 14px",borderRadius:10,background:isSel?"#1E3A5F":"white",border:isSel?"1.5px solid #1E3A5F":"1px solid #E2E8F0",color:isSel?"white":"#374151",fontWeight:isSel?700:500,cursor:"pointer",fontSize:13,fontFamily:"inherit",textAlign:"left"}}>
-                <span style={{width:8,height:8,borderRadius:"50%",background:hasSaved?(isSel?"#86EFAC":"#22C55E"):(isSel?"rgba(255,255,255,0.3)":"#E2E8F0"),flexShrink:0}}/>
-                {c}
-              </button>
-            );
-          })}
-          <p style={{fontSize:10,color:"#CBD5E1",textAlign:"center",margin:"8px 0 0",lineHeight:1.4}}>Green dot = details saved</p>
-        </div>
-
-        {/* Details panel */}
-        <div style={{display:"flex",flexDirection:"column",gap:16}}>
-
-          {/* Toolbar */}
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"white",borderRadius:12,padding:"12px 18px",border:"1px solid #E2E8F0",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
-            <div>
-              <span style={{fontWeight:700,fontSize:15,color:"#0F172A"}}>{selected}</span>
-              {savedMsg&&<span style={{marginLeft:10,fontSize:12,color:"#16A34A",fontWeight:600}}>✓ Saved &amp; synced</span>}
-            </div>
-            {isAdmin&&(
-              editMode?(
-                <div style={{display:"flex",gap:8}}>
-                  <button onClick={handleCancel} style={btn("#F1F5F9","#374151")}>Cancel</button>
-                  <button onClick={handleSave}   style={btn(saving?"#93C5FD":"#16A34A")}>{saving?"Saving…":"Save Changes"}</button>
-                </div>
-              ):(
-                <button onClick={()=>setEditMode(true)} style={btn("#2563EB")}>✏️ Edit</button>
-              )
-            )}
-          </div>
-
-          {/* Contact Details */}
-          <div style={{background:"white",borderRadius:14,padding:24,border:"1px solid #E2E8F0",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
-            <h2 style={{margin:"0 0 18px",fontSize:15,fontWeight:700,color:"#0F172A"}}>👤 Contact Details</h2>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
-              {contactFields.map((f)=>(
-                <div key={f.key}>
-                  <label style={lbl}>{f.label}</label>
-                  {editMode?(
-                    <input value={localData.contact[f.key]||""} onChange={(e)=>updateContact(f.key,e.target.value)} style={inp()} onFocus={(e)=>e.target.style.borderColor="#93C5FD"} onBlur={(e)=>e.target.style.borderColor="#E2E8F0"}/>
-                  ):(
-                    <div style={{fontSize:13,color:localData.contact[f.key]?"#1E293B":"#CBD5E1",fontWeight:localData.contact[f.key]?500:400,padding:"8px 0",borderBottom:"1px solid #F8FAFC"}}>
-                      {localData.contact[f.key]||"—"}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Portal Credentials */}
-          <div style={{background:"white",borderRadius:14,padding:24,border:"1px solid #E2E8F0",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
-            <h2 style={{margin:"0 0 18px",fontSize:15,fontWeight:700,color:"#0F172A"}}>🔑 Portal Credentials</h2>
-
-            <div style={{display:"flex",flexDirection:"column",gap:12}}>
-              {localData.portals.map((portal:any,i:number)=>(
-                <div key={portal.id||i} style={{padding:16,borderRadius:12,border:`1.5px solid ${editMode?"#E2E8F0":"#F1F5F9"}`,background:editMode?"white":"#FAFAFA",transition:"all .2s"}}>
-                  {/* Portal header */}
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-                    {editMode?(
-                      <div style={{flex:1,display:"flex",gap:10}}>
-                        <input value={portal.name} onChange={(e)=>updatePortal(i,"name",e.target.value)} placeholder="Portal name" style={inp({width:"auto",flex:1,fontWeight:700})} onFocus={(e)=>e.target.style.borderColor="#93C5FD"} onBlur={(e)=>e.target.style.borderColor="#E2E8F0"}/>
-                        <input value={portal.url||""} onChange={(e)=>updatePortal(i,"url",e.target.value)} placeholder="URL (optional)" style={inp({width:"auto",flex:1,fontSize:11,color:"#64748B"})} onFocus={(e)=>e.target.style.borderColor="#93C5FD"} onBlur={(e)=>e.target.style.borderColor="#E2E8F0"}/>
-                      </div>
-                    ):(
-                      <div>
-                        <span style={{fontWeight:700,fontSize:14,color:"#0F172A"}}>{portal.name}</span>
-                        {portal.url&&<div style={{fontSize:11,color:"#94A3B8",marginTop:2}}>{portal.url}</div>}
-                      </div>
-                    )}
-                    {editMode&&(
-                      <button onClick={()=>removePortal(i)} title="Delete portal" style={{marginLeft:10,background:"#FEF2F2",border:"1px solid #FECACA",color:"#EF4444",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",flexShrink:0}}>
-                        Delete
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Credentials grid */}
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-                    {/* Username */}
-                    <div>
-                      <label style={lbl}>Username / User ID</label>
-                      {editMode?(
-                        <input value={portal.username||""} onChange={(e)=>updatePortal(i,"username",e.target.value)} placeholder="Username or email" style={inp()} onFocus={(e)=>e.target.style.borderColor="#93C5FD"} onBlur={(e)=>e.target.style.borderColor="#E2E8F0"}/>
-                      ):(
-                        <div style={{display:"flex",alignItems:"center",gap:6}}>
-                          <span style={{fontSize:13,color:portal.username?"#1E293B":"#CBD5E1",flex:1,wordBreak:"break-all" as const}}>{portal.username||"—"}</span>
-                          {portal.username&&(
-                            <button onClick={()=>copyText(portal.username,`u${i}`)} style={{background:copied===`u${i}`?"#DCFCE7":"#F1F5F9",border:"none",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontSize:11,color:copied===`u${i}`?"#166534":"#64748B",fontFamily:"inherit",flexShrink:0}}>
-                              {copied===`u${i}`?"✓":"Copy"}
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Password */}
-                    <div>
-                      <label style={lbl}>Password</label>
-                      {editMode?(
-                        <div style={{display:"flex",gap:6}}>
-                          <input type={showPwd[`e${i}`]?"text":"password"} value={portal.password||""} onChange={(e)=>updatePortal(i,"password",e.target.value)} placeholder="Password" style={inp({flex:1})} onFocus={(e)=>e.target.style.borderColor="#93C5FD"} onBlur={(e)=>e.target.style.borderColor="#E2E8F0"}/>
-                          <button onClick={()=>togglePwd(`e${i}`)} style={{background:"#F1F5F9",border:"1px solid #E2E8F0",borderRadius:7,padding:"6px 8px",cursor:"pointer",fontSize:14,flexShrink:0}}>👁</button>
-                        </div>
-                      ):(
-                        <div style={{display:"flex",alignItems:"center",gap:6}}>
-                          <span style={{fontSize:13,color:portal.password?"#1E293B":"#CBD5E1",flex:1,letterSpacing:showPwd[`v${i}`]?0:2,fontFamily:showPwd[`v${i}`]?"inherit":"monospace"}}>
-                            {portal.password?(showPwd[`v${i}`]?portal.password:"••••••••"):"—"}
-                          </span>
-                          {portal.password&&(
-                            <>
-                              <button onClick={()=>togglePwd(`v${i}`)} style={{background:"#F1F5F9",border:"none",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontSize:13,flexShrink:0}}>👁</button>
-                              <button onClick={()=>copyText(portal.password,`p${i}`)} style={{background:copied===`p${i}`?"#DCFCE7":"#F1F5F9",border:"none",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontSize:11,color:copied===`p${i}`?"#166534":"#64748B",fontFamily:"inherit",flexShrink:0}}>
-                                {copied===`p${i}`?"✓":"Copy"}
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Notes */}
-                  {(editMode||portal.notes)&&(
-                    <div style={{marginTop:10}}>
-                      <label style={lbl}>Notes</label>
-                      {editMode?(
-                        <input value={portal.notes||""} onChange={(e)=>updatePortal(i,"notes",e.target.value)} placeholder="Any additional notes…" style={inp()} onFocus={(e)=>e.target.style.borderColor="#93C5FD"} onBlur={(e)=>e.target.style.borderColor="#E2E8F0"}/>
-                      ):(
-                        <div style={{fontSize:12,color:"#64748B"}}>{portal.notes}</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-
-              {/* Add portal */}
-              {isAdmin&&editMode&&(
-                addingPortal?(
-                  <div style={{padding:16,borderRadius:12,border:"1.5px dashed #93C5FD",background:"#EFF6FF"}}>
-                    <p style={{margin:"0 0 14px",fontSize:13,fontWeight:700,color:"#1D4ED8"}}>+ New Portal</p>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-                      <div><label style={lbl}>Portal Name *</label><input value={newPortal.name} onChange={(e)=>setNewPortal({...newPortal,name:e.target.value})} placeholder="e.g. Traces" style={inp()} onFocus={(e)=>e.target.style.borderColor="#93C5FD"} onBlur={(e)=>e.target.style.borderColor="#E2E8F0"}/></div>
-                      <div><label style={lbl}>URL</label><input value={newPortal.url} onChange={(e)=>setNewPortal({...newPortal,url:e.target.value})} placeholder="https://..." style={inp()} onFocus={(e)=>e.target.style.borderColor="#93C5FD"} onBlur={(e)=>e.target.style.borderColor="#E2E8F0"}/></div>
-                      <div><label style={lbl}>Username</label><input value={newPortal.username} onChange={(e)=>setNewPortal({...newPortal,username:e.target.value})} style={inp()} onFocus={(e)=>e.target.style.borderColor="#93C5FD"} onBlur={(e)=>e.target.style.borderColor="#E2E8F0"}/></div>
-                      <div><label style={lbl}>Password</label><input value={newPortal.password} onChange={(e)=>setNewPortal({...newPortal,password:e.target.value})} style={inp()} onFocus={(e)=>e.target.style.borderColor="#93C5FD"} onBlur={(e)=>e.target.style.borderColor="#E2E8F0"}/></div>
-                    </div>
-                    <div><label style={lbl}>Notes</label><input value={newPortal.notes} onChange={(e)=>setNewPortal({...newPortal,notes:e.target.value})} placeholder="Optional…" style={{...inp(),marginBottom:12}} onFocus={(e)=>e.target.style.borderColor="#93C5FD"} onBlur={(e)=>e.target.style.borderColor="#E2E8F0"}/></div>
-                    <div style={{display:"flex",gap:8}}>
-                      <button onClick={()=>{setAddingPortal(false);setNewPortal({name:"",url:"",username:"",password:"",notes:""}); }} style={btn("#F1F5F9","#374151")}>Cancel</button>
-                      <button onClick={addPortal} style={btn("#2563EB")}>Add Portal</button>
-                    </div>
-                  </div>
-                ):(
-                  <button onClick={()=>setAddingPortal(true)} style={{padding:"12px",borderRadius:10,border:"1.5px dashed #D1D5DB",background:"transparent",color:"#64748B",fontSize:13,cursor:"pointer",fontFamily:"inherit",width:"100%",textAlign:"center"}}>
-                    + Add New Portal
-                  </button>
-                )
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Settings Panel ────────────────────────────────────────────────────────
 function SettingsPanel({ settings, onSave }: any) {
@@ -865,7 +791,7 @@ function SettingsPanel({ settings, onSave }: any) {
     {id:"bookkeepingClients",emoji:"📚",label:"BK Clients",   desc:"Clients for monthly bookkeeping & closing"},
     {id:"teamMembers",       emoji:"👤",label:"Team Members", desc:"Names shown in the 'Done by' dropdown"},
     {id:"bookkeepingTasks",  emoji:"✅",label:"BK Tasks",     desc:"Monthly closing checklist for all BK clients"},
-    {id:"adminEmails",       emoji:"🔐",label:"Admin Emails", desc:"Emails that can edit the Client Vault (leave empty = everyone can edit)"},
+
   ];
   const remove=(k:string,i:number)=>setLocal((p:any)=>({...p,[k]:p[k].filter((_:any,j:number)=>j!==i)}));
   const add=(k:string)=>{const v=(newVal[k]||"").trim();if(!v||local[k].includes(v))return;setLocal((p:any)=>({...p,[k]:[...p[k],v]}));setNewVal((p:any)=>({...p,[k]:""}));};
@@ -925,7 +851,6 @@ export default function App() {
   const [settings,    setSettings]    = useState<any>(DEFAULTS);
   const [gstData,     setGstData]     = useState<any>({});
   const [bkData,      setBkData]      = useState<any>({});
-  const [vaultData,   setVaultData]   = useState<any>({});
   const [month,       setMonth]       = useState(CURRENT_MONTH);
   const [fy,          setFy]          = useState(CURRENT_FY);
   const [dataReady,   setDataReady]   = useState(false);
@@ -936,20 +861,16 @@ export default function App() {
   useEffect(()=>{
     if(!user) return;
     let count=0;
-    const check=()=>{ count++; if(count===4) setDataReady(true); };
+    const check=()=>{ count++; if(count===3) setDataReady(true); };
     const uS=onSnapshot(doc(db,"tracker","settings"),(s)=>{ if(s.exists()) setSettings(s.data()); else setDoc(doc(db,"tracker","settings"),DEFAULTS); check(); });
     const uG=onSnapshot(doc(db,"tracker","gst"),    (s)=>{ if(s.exists()) setGstData(s.data());   else setGstData({});   check(); });
     const uB=onSnapshot(doc(db,"tracker","bk"),     (s)=>{ if(s.exists()) setBkData(s.data());    else setBkData({});    check(); });
-    const uV=onSnapshot(doc(db,"tracker","vault"),  (s)=>{ if(s.exists()) setVaultData(s.data()); else setVaultData({}); check(); });
     return()=>{ uS();uG();uB();uV(); };
   },[user]);
 
   const closePopover = useCallback(()=>setPopover(null),[]);
   const mk = mkKey(fy, month); // BK uses calendar month key
 
-  // Admin check: if adminEmails is empty or all blank → everyone is admin
-  const adminEmails    = (settings.adminEmails||[]).filter((e:string)=>e.trim()!=="");
-  const isAdmin        = adminEmails.length===0 || (!!user && adminEmails.includes(user.email));
 
   if(user===undefined) return <Loader text="Checking credentials…"/>;
   if(!user)            return <LoginScreen/>;
@@ -964,7 +885,6 @@ export default function App() {
         {tab==="dashboard"   && <Dashboard    settings={settings} gstData={gstData} bkData={bkData} fy={fy} onNavigate={(t:string)=>setTab(t)}/>}
         {tab==="gst"         && <GSTTab       settings={settings} gstData={gstData} month={month} fy={fy} setPopover={setPopover}/>}
         {tab==="bookkeeping" && <BKTab        settings={settings} bkData={bkData} mk={mk} month={month} setPopover={setPopover}/>}
-        {tab==="vault"       && <ClientVaultTab settings={settings} vaultData={vaultData} isAdmin={isAdmin}/>}
         {tab==="settings"    && <SettingsPanel  settings={settings} onSave={fbSaveSettings}/>}
       </div>
       {popover&&<Popover {...popover} teamMembers={settings.teamMembers} onClose={closePopover}/>}
