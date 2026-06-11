@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import * as XLSX from 'xlsx';
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
@@ -84,7 +83,6 @@ const dc          = (o: any)    => JSON.parse(JSON.stringify(o));
 // Tracker starts Jun 2026 — hide Apr & May for FY 2026
 const getAvailableMonths = (fy: number): string[] =>
   fy === 2026 ? FY_MONTHS.slice(2) : FY_MONTHS; // slice(2) = Jun onwards
-const sanitizeKey = (n: string) => n.replace(/\./g,"").replace(/\s+/g,"_").replace(/&/g,"and");
 
 
 // ── Firebase write helpers ────────────────────────────────────────────────
@@ -272,7 +270,7 @@ function MonthBar({ month, setMonth, fy, setFy }: any) {
       <select value={fy} onChange={(e)=>setFy(Number(e.target.value))} style={{background:"rgba(255,255,255,0.1)",color:"white",border:"1px solid rgba(255,255,255,0.15)",borderRadius:6,padding:"3px 8px",fontSize:11,marginRight:14,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
         {[2026,2027,2028,2029,2030].map((y)=><option key={y} value={y} style={{background:"#162d50"}}>{fyL(y)}</option>)}
       </select>
-      {FY_MONTHS.map((m)=>{
+      {getAvailableMonths(fy).map((m)=>{
         const isCur=m===CURRENT_MONTH&&fy===CURRENT_FY, isSel=m===month;
         return (
           <button key={m} onClick={()=>setMonth(m)} style={{background:isSel?"rgba(255,255,255,0.12)":"transparent",border:"none",color:"white",padding:"10px 14px",cursor:"pointer",fontSize:12,fontWeight:isSel?700:400,borderBottom:isSel?"2px solid #60A5FA":"2px solid transparent",whiteSpace:"nowrap",fontFamily:"inherit",flexShrink:0,opacity:isSel?1:0.55,display:"inline-flex",alignItems:"center",gap:5}}>
@@ -304,8 +302,10 @@ function getMonthsInRange(startFY:number, startMonth:string, endFY:number, endMo
   return result;
 }
 
-function doExport(settings:any, gstData:any, bkData:any, months:any[]) {
-  const capitalize = (s:string) => s.charAt(0).toUpperCase()+s.slice(1);
+async function doExport(settings:any, gstData:any, bkData:any, months:any[]) {
+  // eslint-disable-next-line
+  // @ts-ignore
+  const XLSX = await import('xlsx');
   const statusLabel = (s:string) => ({ done:'Done', in_progress:'In Progress', na:'N/A', pending:'Pending' }[s]||'Pending');
   const periodFrom = months[0]?.label || '';
   const periodTo   = months[months.length-1]?.label || '';
@@ -410,10 +410,10 @@ function ExportModal({ settings, gstData, bkData, onClose }: any) {
   const months = getMonthsInRange(startFY, startMonth, endFY, endMonth);
   const valid  = months.length > 0 && months.length <= 36;
 
-  const handleExport = () => {
+  const handleExport = async () => {
     if (!valid) { setError('Invalid date range — make sure From is before To.'); return; }
     setExporting(true); setError('');
-    try { doExport(settings, gstData, bkData, months); }
+    try { await doExport(settings, gstData, bkData, months); }
     catch(e) { setError('Export failed. Make sure xlsx is installed (npm install xlsx).'); }
     setExporting(false);
     onClose();
@@ -534,9 +534,12 @@ function Dashboard({ settings, gstData, bkData, fy, onNavigate, onExport }: any)
 
   return (
     <div style={{paddingBottom:40}}>
-      <div style={{marginBottom:24}}>
-        <h1 style={{margin:0,fontSize:24,fontWeight:800,color:"#0F172A"}}>Overview</h1>
-        <p style={{margin:"4px 0 0",color:"#64748B",fontSize:14}}>{fyL(fy)} · Current month: {CURRENT_MONTH} 2026</p>
+      <div style={{marginBottom:24,display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+        <div>
+          <h1 style={{margin:0,fontSize:24,fontWeight:800,color:"#0F172A"}}>Overview</h1>
+          <p style={{margin:"4px 0 0",color:"#64748B",fontSize:14}}>{fyL(fy)} · Current month: {CURRENT_MONTH} 2026</p>
+        </div>
+        <button onClick={onExport} style={{padding:"9px 18px",borderRadius:10,border:"none",background:"#2563EB",color:"white",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:6,flexShrink:0}}>Export to Excel</button>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14,marginBottom:28}}>
         {cards.map((c)=>(
@@ -855,8 +858,25 @@ export default function App() {
   const [fy,          setFy]          = useState(CURRENT_FY);
   const [dataReady,   setDataReady]   = useState(false);
   const [popover,     setPopover]     = useState<any>(null);
+  const [showExport,  setShowExport]  = useState(false);
+  const [idleWarning, setIdleWarning] = useState(false);
 
   useEffect(()=>{ const u=onAuthStateChanged(auth,(u)=>setUser(u)); return u; },[]);
+
+  useEffect(()=>{
+    if(!user) return;
+    const WARN = 9*60*1000, IDLE = 10*60*1000;
+    let wT: ReturnType<typeof setTimeout>, iT: ReturnType<typeof setTimeout>;
+    const reset=()=>{
+      clearTimeout(wT); clearTimeout(iT); setIdleWarning(false);
+      wT=setTimeout(()=>setIdleWarning(true), WARN);
+      iT=setTimeout(()=>{ setIdleWarning(false); signOut(auth); }, IDLE);
+    };
+    const EVT=['mousedown','mousemove','keydown','scroll','touchstart','click'];
+    EVT.forEach(e=>document.addEventListener(e,reset,{passive:true}));
+    reset();
+    return()=>{ clearTimeout(wT); clearTimeout(iT); EVT.forEach(e=>document.removeEventListener(e,reset)); };
+  },[user]);
 
   useEffect(()=>{
     if(!user) return;
@@ -865,7 +885,7 @@ export default function App() {
     const uS=onSnapshot(doc(db,"tracker","settings"),(s)=>{ if(s.exists()) setSettings(s.data()); else setDoc(doc(db,"tracker","settings"),DEFAULTS); check(); });
     const uG=onSnapshot(doc(db,"tracker","gst"),    (s)=>{ if(s.exists()) setGstData(s.data());   else setGstData({});   check(); });
     const uB=onSnapshot(doc(db,"tracker","bk"),     (s)=>{ if(s.exists()) setBkData(s.data());    else setBkData({});    check(); });
-    return()=>{ uS();uG();uB();uV(); };
+    return()=>{ uS();uG();uB(); };
   },[user]);
 
   const closePopover = useCallback(()=>setPopover(null),[]);
@@ -882,12 +902,19 @@ export default function App() {
       <Nav tab={tab} setTab={setTab} userEmail={user.email}/>
       {(tab==="gst"||tab==="bookkeeping")&&<MonthBar month={month} setMonth={setMonth} fy={fy} setFy={setFy}/>}
       <div style={{maxWidth:1200,margin:"0 auto",padding:"28px 20px"}}>
-        {tab==="dashboard"   && <Dashboard    settings={settings} gstData={gstData} bkData={bkData} fy={fy} onNavigate={(t:string)=>setTab(t)}/>}
+        {tab==="dashboard"   && <Dashboard    settings={settings} gstData={gstData} bkData={bkData} fy={fy} onNavigate={(t:string)=>setTab(t)} onExport={()=>setShowExport(true)}/>}
         {tab==="gst"         && <GSTTab       settings={settings} gstData={gstData} month={month} fy={fy} setPopover={setPopover}/>}
         {tab==="bookkeeping" && <BKTab        settings={settings} bkData={bkData} mk={mk} month={month} setPopover={setPopover}/>}
         {tab==="settings"    && <SettingsPanel  settings={settings} onSave={fbSaveSettings}/>}
       </div>
       {popover&&<Popover {...popover} teamMembers={settings.teamMembers} onClose={closePopover}/>}
+      {showExport&&<ExportModal settings={settings} gstData={gstData} bkData={bkData} onClose={()=>setShowExport(false)}/>}
+      {idleWarning&&(
+        <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",zIndex:9999,background:"#1E3A5F",color:"white",borderRadius:12,padding:"14px 24px",boxShadow:"0 8px 32px rgba(0,0,0,0.3)",display:"flex",alignItems:"center",gap:16,fontSize:13,whiteSpace:"nowrap"}}>
+          <span>You will be signed out in <strong>1 minute</strong> due to inactivity.</span>
+          <button onClick={()=>setIdleWarning(false)} style={{background:"#60A5FA",border:"none",color:"white",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontWeight:700,fontFamily:"inherit",fontSize:12}}>I am here</button>
+        </div>
+      )}
     </div>
   );
 }
