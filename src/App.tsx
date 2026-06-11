@@ -208,7 +208,7 @@ function LoginScreen() {
         <div style={{textAlign:"center",marginBottom:32}}>
           <div style={{fontSize:44,marginBottom:12}}>🏛️</div>
           <h1 style={{margin:0,fontSize:22,fontWeight:800,color:"#0F172A"}}>Compliance Tracker</h1>
-          <p style={{margin:"6px 0 0",color:"#64748B",fontSize:13}}>SS &amp; Co. — Please sign in</p>
+          <p style={{margin:"6px 0 0",color:"#64748B",fontSize:13}}>Sanket Salecha &amp; Co. — Please sign in</p>
         </div>
         {error&&<div style={{background:"#FEF2F2",color:"#DC2626",padding:"10px 14px",borderRadius:9,marginBottom:16,fontSize:13,border:"1px solid #FECACA"}}>{error}</div>}
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
