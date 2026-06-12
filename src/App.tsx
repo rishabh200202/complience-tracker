@@ -402,7 +402,7 @@ function doExport(settings:any, gstData:any, bkData:any, months:any[]) {
   const today      = new Date().toLocaleDateString('en-IN');
 
   const makeTable = (rows:any[][]) =>
-    `<table border="1"><tbody>${rows.map(r=>`<tr>${r.map((c,ci)=>`<td style="mso-number-format:'@'">${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    `<table border="1"><tbody>${rows.map(r=>`<tr>${r.map((c)=>`<td style="mso-number-format:'@'">${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 
   // ── Summary sheet ──────────────────────────────────────────────────────
   const sumRows:any[][] = [
