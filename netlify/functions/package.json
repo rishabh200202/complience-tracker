@@ -1,0 +1,9 @@
+{
+    "name": "compliance-tracker-functions",
+    "private": true,
+    "dependencies": {
+      "firebase-admin": "^12.0.0",
+      "googleapis": "^140.0.0"
+    }
+  }
+  

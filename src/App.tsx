@@ -208,7 +208,7 @@ function LoginScreen() {
         <div style={{textAlign:"center",marginBottom:32}}>
           <div style={{fontSize:44,marginBottom:12}}>🏛️</div>
           <h1 style={{margin:0,fontSize:22,fontWeight:800,color:"#0F172A"}}>Compliance Tracker</h1>
-          <p style={{margin:"6px 0 0",color:"#64748B",fontSize:13}}>Sanket Salecha &amp; Co. — Please sign in</p>
+          <p style={{margin:"6px 0 0",color:"#64748B",fontSize:13}}>SS &amp; Co. — Please sign in</p>
         </div>
         {error&&<div style={{background:"#FEF2F2",color:"#DC2626",padding:"10px 14px",borderRadius:9,marginBottom:16,fontSize:13,border:"1px solid #FECACA"}}>{error}</div>}
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
@@ -282,6 +282,98 @@ function MonthBar({ month, setMonth, fy, setFy }: any) {
   );
 }
 
+// ── Sync to Google Sheet Modal (OTP flow) ────────────────────────────────
+function SyncModal({ onClose }: any) {
+  const [step, setStep] = useState<'confirm'|'otp'|'syncing'|'done'|'error'>('confirm');
+  const [otp, setOtp] = useState('');
+  const [error, setError] = useState('');
+  const [rowsUpdated, setRowsUpdated] = useState(0);
+
+  const sendOtp = async () => {
+    setStep('otp'); setError('');
+    try {
+      const res = await fetch('/.netlify/functions/send-otp', { method:'POST' });
+      if(!res.ok) throw new Error('Failed to send OTP');
+    } catch(e:any) { setError(e.message); setStep('confirm'); }
+  };
+
+  const verifyAndSync = async () => {
+    if(!otp.trim()) { setError('Enter the OTP sent to your email.'); return; }
+    setStep('syncing'); setError('');
+    try {
+      const vRes = await fetch('/.netlify/functions/verify-otp', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({otp:otp.trim()})
+      });
+      const vData = await vRes.json();
+      if(!vData.valid) { setError(vData.error||'Invalid OTP'); setStep('otp'); return; }
+
+      const sRes = await fetch('/.netlify/functions/sync-to-sheet', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({syncToken:vData.syncToken})
+      });
+      const sData = await sRes.json();
+      if(!sRes.ok) throw new Error(sData.error||'Sync failed');
+      setRowsUpdated(sData.rowsUpdated||0);
+      setStep('done');
+    } catch(e:any) { setError(e.message); setStep('otp'); }
+  };
+
+  const inp = {width:'100%',padding:'12px 14px',borderRadius:10,border:'1.5px solid #E2E8F0',fontSize:18,fontFamily:'inherit',outline:'none',textAlign:'center' as const,letterSpacing:8,fontWeight:800 as const,boxSizing:'border-box' as const};
+  const btnPrimary = {flex:1,padding:'11px',borderRadius:10,border:'none',background:'#2563EB',color:'white',fontWeight:700 as const,fontSize:13,cursor:'pointer' as const,fontFamily:'inherit'};
+  const btnGhost   = {flex:1,padding:'11px',borderRadius:10,border:'1.5px solid #E2E8F0',background:'white',color:'#374151',fontWeight:600 as const,fontSize:13,cursor:'pointer' as const,fontFamily:'inherit'};
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={step==='syncing'?undefined:onClose}>
+      <div style={{background:'white',borderRadius:16,padding:32,width:420,boxShadow:'0 24px 64px rgba(0,0,0,0.25)'}} onClick={e=>e.stopPropagation()}>
+
+        {step==='confirm' && (<>
+          <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:6}}>
+            <span style={{fontSize:28}}>🔄</span>
+            <h2 style={{margin:0,fontSize:18,fontWeight:800,color:'#0F172A'}}>Push to Google Sheet</h2>
+          </div>
+          <p style={{margin:'0 0 20px',color:'#64748B',fontSize:13}}>This will overwrite GST Filings and Bookkeeping data in your Google Sheet with the current data from this tracker. A one-time code will be sent to your email to confirm.</p>
+          {error && <div style={{background:'#FEF2F2',color:'#DC2626',padding:'10px 14px',borderRadius:9,marginBottom:16,fontSize:13,border:'1px solid #FECACA'}}>{error}</div>}
+          <div style={{display:'flex',gap:10}}>
+            <button onClick={onClose} style={btnGhost}>Cancel</button>
+            <button onClick={sendOtp} style={btnPrimary}>Send OTP &amp; Continue</button>
+          </div>
+        </>)}
+
+        {step==='otp' && (<>
+          <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:6}}>
+            <span style={{fontSize:28}}>📧</span>
+            <h2 style={{margin:0,fontSize:18,fontWeight:800,color:'#0F172A'}}>Enter OTP</h2>
+          </div>
+          <p style={{margin:'0 0 20px',color:'#64748B',fontSize:13}}>A 6-digit code was sent to your email. It expires in 5 minutes.</p>
+          <input value={otp} onChange={e=>setOtp(e.target.value.replace(/\D/g,'').slice(0,6))} onKeyDown={e=>e.key==='Enter'&&verifyAndSync()} placeholder="000000" maxLength={6} style={{...inp,marginBottom:16}} autoFocus/>
+          {error && <div style={{background:'#FEF2F2',color:'#DC2626',padding:'10px 14px',borderRadius:9,marginBottom:16,fontSize:13,border:'1px solid #FECACA'}}>{error}</div>}
+          <div style={{display:'flex',gap:10}}>
+            <button onClick={onClose} style={btnGhost}>Cancel</button>
+            <button onClick={verifyAndSync} style={btnPrimary}>Verify &amp; Sync</button>
+          </div>
+        </>)}
+
+        {step==='syncing' && (
+          <div style={{textAlign:'center',padding:'20px 0'}}>
+            <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+            <div style={{width:40,height:40,border:'3px solid #E2E8F0',borderTopColor:'#2563EB',borderRadius:'50%',animation:'spin .8s linear infinite',margin:'0 auto 16px'}}/>
+            <p style={{fontSize:14,color:'#374151',fontWeight:600}}>Syncing to Google Sheet…</p>
+            <p style={{fontSize:12,color:'#94A3B8',marginTop:4}}>This may take a few seconds</p>
+          </div>
+        )}
+
+        {step==='done' && (<>
+          <div style={{textAlign:'center',padding:'12px 0'}}>
+            <div style={{fontSize:44,marginBottom:12}}>✅</div>
+            <h2 style={{margin:0,fontSize:18,fontWeight:800,color:'#0F172A'}}>Synced Successfully</h2>
+            <p style={{margin:'8px 0 20px',color:'#64748B',fontSize:13}}>{rowsUpdated} row ranges updated in your Google Sheet.</p>
+            <button onClick={onClose} style={{...btnPrimary,width:'100%'}}>Done</button>
+          </div>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
 // ── Export Helpers ────────────────────────────────────────────────────────
 function getMonthsInRange(startFY:number, startMonth:string, endFY:number, endMonth:string) {
   const result: any[] = [];
@@ -302,101 +394,119 @@ function getMonthsInRange(startFY:number, startMonth:string, endFY:number, endMo
   return result;
 }
 
-async function doExport(settings:any, gstData:any, bkData:any, months:any[]) {
-  // eslint-disable-next-line
-  // @ts-ignore
-  const XLSX = await import('xlsx');
-  const statusLabel = (s:string) => ({ done:'Done', in_progress:'In Progress', na:'N/A', pending:'Pending' }[s]||'Pending');
-  const periodFrom = months[0]?.label || '';
-  const periodTo   = months[months.length-1]?.label || '';
-  const wb = XLSX.utils.book_new();
+function doExport(settings:any, gstData:any, bkData:any, months:any[]) {
+  const esc = (v:any) => String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const statusLabel = (s:string) => ({done:'Done',in_progress:'In Progress',na:'N/A',pending:'Pending'}[s]||'Pending');
+  const periodFrom = months[0]?.label||'', periodTo = months[months.length-1]?.label||'';
+  const filename   = `SanketSalechaAndCo_${periodFrom.replace(' ','_')}_to_${periodTo.replace(' ','_')}`;
+  const today      = new Date().toLocaleDateString('en-IN');
 
-  // ── Summary sheet ──────────────────────────────────────────────
+  const makeTable = (rows:any[][]) =>
+    `<table border="1"><tbody>${rows.map(r=>`<tr>${r.map((c,ci)=>`<td style="mso-number-format:'@'">${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+
+  // ── Summary sheet ──────────────────────────────────────────────────────
   const sumRows:any[][] = [
     ['Sanket Salecha & Co. — Compliance Tracker'],
-    [`Period: ${periodFrom} to ${periodTo}`],
-    [`Generated: ${new Date().toLocaleDateString('en-IN')}`],
+    [`Period: ${periodFrom} to ${periodTo}  |  Generated: ${today}`],
     [],
     ['CLIENT','TYPE',...months.map(m=>m.label),'TOTAL'],
   ];
   settings.gstClients.forEach((c:string)=>{
     let done=0;
     const row=[c,'GST'];
-    months.forEach(m=>{
+    months.forEach((m:any)=>{
       const s1=gstData[m.gstMk]?.[c]?.['GSTR-1']?.status||'pending';
       const s3=gstData[m.gstMk]?.[c]?.['GSTR-3B']?.status||'pending';
       const both=s1==='done'&&s3==='done';
-      row.push(both?'Done':(['done','in_progress'].includes(s1)||['done','in_progress'].includes(s3))?'Partial':s1==='na'&&s3==='na'?'N/A':'Pending');
+      const isNA=s1==='na'&&s3==='na';
+      row.push(isNA?'N/A':both?'Filed':(['done','in_progress'].includes(s1)||['done','in_progress'].includes(s3))?'Partial':'Pending');
       if(both) done++;
     });
-    const gstTotal=months.filter(m=>{const s1=gstData[m.gstMk]?.[c]?.['GSTR-1']?.status||'pending';const s3=gstData[m.gstMk]?.[c]?.['GSTR-3B']?.status||'pending';return!(s1==='na'&&s3==='na');}).length;
-    row.push(`${done}/${gstTotal}`);
+    const eligible=months.filter((m:any)=>{const s1=gstData[m.gstMk]?.[c]?.['GSTR-1']?.status||'pending';const s3=gstData[m.gstMk]?.[c]?.['GSTR-3B']?.status||'pending';return!(s1==='na'&&s3==='na');}).length;
+    row.push(`${done}/${eligible}`);
     sumRows.push(row);
   });
   sumRows.push([]);
   settings.bookkeepingClients.forEach((c:string)=>{
     let td=0,tt=0;
     const row=[c,'Bookkeeping'];
-    months.forEach(m=>{
+    months.forEach((m:any)=>{
       const d=settings.bookkeepingTasks.filter((t:string)=>bkData[m.bkMk]?.[c]?.[t]?.status==='done').length;
-      const tot=settings.bookkeepingTasks.length;
+      const tot=settings.bookkeepingTasks.filter((t:string)=>(bkData[m.bkMk]?.[c]?.[t]?.status||'pending')!=='na').length;
       row.push(`${d}/${tot}`); td+=d; tt+=tot;
     });
     row.push(`${td}/${tt}`);
     sumRows.push(row);
   });
-  const sumWs=XLSX.utils.aoa_to_sheet(sumRows);
-  sumWs['!cols']=[{wch:28},{wch:14},...months.map(()=>({wch:12})),{wch:10}];
-  XLSX.utils.book_append_sheet(wb,sumWs,'Summary');
 
-  // ── GST Filings sheet ──────────────────────────────────────────
-  const gstHdr=['CLIENT',...months.flatMap(m=>[`${m.filingLabel}\nGSTR-1`,`GSTR-1 By`,`GSTR-3B`,`GSTR-3B By`])];
-  const gstRows:any[][]=[
+  // ── GST Filings sheet ──────────────────────────────────────────────────
+  const gstRows:any[][] = [
     ['Sanket Salecha & Co. — GST Filings'],
-    [`Period: ${periodFrom} to ${periodTo} (returns filed in each calendar month)`],
+    [`Period: ${periodFrom} to ${periodTo}  |  Each month = returns filed in that month (prev month returns)`],
     [],
-    gstHdr,
+    ['CLIENT',...months.flatMap((m:any)=>[`${m.filingLabel} GSTR-1`,`GSTR-1 By`,`GSTR-3B`,`GSTR-3B By`])],
   ];
   settings.gstClients.forEach((c:string)=>{
     const row=[c];
-    months.forEach(m=>{
+    months.forEach((m:any)=>{
       const e1=gstData[m.gstMk]?.[c]?.['GSTR-1']||{};
       const e3=gstData[m.gstMk]?.[c]?.['GSTR-3B']||{};
       row.push(statusLabel(e1.status||'pending'),e1.by||'',statusLabel(e3.status||'pending'),e3.by||'');
     });
     gstRows.push(row);
   });
-  const gstWs=XLSX.utils.aoa_to_sheet(gstRows);
-  gstWs['!cols']=[{wch:28},...months.flatMap(()=>[{wch:14},{wch:12},{wch:14},{wch:12}])];
-  XLSX.utils.book_append_sheet(wb,gstWs,'GST Filings');
 
-  // ── Bookkeeping sheet ──────────────────────────────────────────
-  const bkRows:any[][]=[
+  // ── Bookkeeping sheet ──────────────────────────────────────────────────
+  const bkRows:any[][] = [
     ['Sanket Salecha & Co. — Bookkeeping Closing'],
     [`Period: ${periodFrom} to ${periodTo}`],
     [],
-    ['CLIENT','TASK',...months.map(m=>m.label),'DONE'],
+    ['CLIENT','TASK',...months.map((m:any)=>m.label),'DONE / TOTAL'],
   ];
   settings.bookkeepingClients.forEach((c:string)=>{
     settings.bookkeepingTasks.forEach((task:string,ti:number)=>{
       let done=0;
       const row=[ti===0?c:'',task];
-      months.forEach(m=>{
+      months.forEach((m:any)=>{
         const e=bkData[m.bkMk]?.[c]?.[task]||{};
-        row.push(statusLabel(e.status||'pending')+(e.by?` (${e.by})`:''));
-        if(e.status==='done') done++;
+        const st=e.status||'pending';
+        row.push(st==='done'?`Done${e.by?` (${e.by})`:''}`:`${statusLabel(st)}`);
+        if(st==='done') done++;
       });
-      row.push(`${done}/${months.length}`);
+      const eligible=months.filter((m:any)=>(bkData[m.bkMk]?.[c]?.[task]?.status||'pending')!=='na').length;
+      row.push(`${done}/${eligible}`);
       bkRows.push(row);
     });
     bkRows.push([]);
   });
-  const bkWs=XLSX.utils.aoa_to_sheet(bkRows);
-  bkWs['!cols']=[{wch:28},{wch:26},...months.map(()=>({wch:16})),{wch:10}];
-  XLSX.utils.book_append_sheet(wb,bkWs,'Bookkeeping');
 
-  XLSX.writeFile(wb,`SanketSalechaAndCo_Compliance_${periodFrom.replace(' ','_')}_to_${periodTo.replace(' ','_')}.xlsx`);
+  // ── Generate multi-sheet Excel HTML file ───────────────────────────────
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office"
+xmlns:x="urn:schemas-microsoft-com:office:excel"
+xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="UTF-8">
+<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets>
+<x:ExcelWorksheet><x:Name>Summary</x:Name><x:WorksheetOptions><x:Selected/></x:WorksheetOptions></x:ExcelWorksheet>
+<x:ExcelWorksheet><x:Name>GST Filings</x:Name></x:ExcelWorksheet>
+<x:ExcelWorksheet><x:Name>Bookkeeping</x:Name></x:ExcelWorksheet>
+</x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
+<style>td{font-family:Calibri;font-size:11pt} tr:first-child td{font-weight:bold;background:#1E3A5F;color:white}</style>
+</head><body>
+${makeTable(sumRows)}
+<br>
+${makeTable(gstRows)}
+<br>
+${makeTable(bkRows)}
+</body></html>`;
+
+  const blob = new Blob(['﻿'+html], {type:'application/vnd.ms-excel;charset=UTF-8'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href=url; a.download=filename+'.xls';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
 }
+
 
 // ── Export Modal ──────────────────────────────────────────────────────────
 function ExportModal({ settings, gstData, bkData, onClose }: any) {
@@ -410,10 +520,10 @@ function ExportModal({ settings, gstData, bkData, onClose }: any) {
   const months = getMonthsInRange(startFY, startMonth, endFY, endMonth);
   const valid  = months.length > 0 && months.length <= 36;
 
-  const handleExport = async () => {
+  const handleExport = () => {
     if (!valid) { setError('Invalid date range — make sure From is before To.'); return; }
     setExporting(true); setError('');
-    try { await doExport(settings, gstData, bkData, months); }
+    try { doExport(settings, gstData, bkData, months); }
     catch(e) { setError('Export failed. Make sure xlsx is installed (npm install xlsx).'); }
     setExporting(false);
     onClose();
@@ -483,7 +593,7 @@ function ExportModal({ settings, gstData, bkData, onClose }: any) {
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────
-function Dashboard({ settings, gstData, bkData, fy, onNavigate, onExport }: any) {
+function Dashboard({ settings, gstData, bkData, fy, onNavigate, onExport, onSync }: any) {
   const {gstClients,bookkeepingClients,bookkeepingTasks} = settings;
 
   // GST done count: uses FILING PERIOD of current calendar month
@@ -539,7 +649,10 @@ function Dashboard({ settings, gstData, bkData, fy, onNavigate, onExport }: any)
           <h1 style={{margin:0,fontSize:24,fontWeight:800,color:"#0F172A"}}>Overview</h1>
           <p style={{margin:"4px 0 0",color:"#64748B",fontSize:14}}>{fyL(fy)} · Current month: {CURRENT_MONTH} 2026</p>
         </div>
-        <button onClick={onExport} style={{padding:"9px 18px",borderRadius:10,border:"none",background:"#2563EB",color:"white",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:6,flexShrink:0}}>Export to Excel</button>
+        <div style={{display:"flex",gap:10,flexShrink:0}}>
+          <button onClick={onSync} style={{padding:"9px 18px",borderRadius:10,border:"1.5px solid #2563EB",background:"white",color:"#2563EB",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:6}}>Push to Sheet</button>
+          <button onClick={onExport} style={{padding:"9px 18px",borderRadius:10,border:"none",background:"#2563EB",color:"white",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:6}}>Export to Excel</button>
+        </div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14,marginBottom:28}}>
         {cards.map((c)=>(
@@ -860,6 +973,7 @@ export default function App() {
   const [popover,     setPopover]     = useState<any>(null);
   const [showExport,  setShowExport]  = useState(false);
   const [idleWarning, setIdleWarning] = useState(false);
+  const [showSync,    setShowSync]    = useState(false);
 
   useEffect(()=>{ const u=onAuthStateChanged(auth,(u)=>setUser(u)); return u; },[]);
 
@@ -902,13 +1016,14 @@ export default function App() {
       <Nav tab={tab} setTab={setTab} userEmail={user.email}/>
       {(tab==="gst"||tab==="bookkeeping")&&<MonthBar month={month} setMonth={setMonth} fy={fy} setFy={setFy}/>}
       <div style={{maxWidth:1200,margin:"0 auto",padding:"28px 20px"}}>
-        {tab==="dashboard"   && <Dashboard    settings={settings} gstData={gstData} bkData={bkData} fy={fy} onNavigate={(t:string)=>setTab(t)} onExport={()=>setShowExport(true)}/>}
+        {tab==="dashboard"   && <Dashboard    settings={settings} gstData={gstData} bkData={bkData} fy={fy} onNavigate={(t:string)=>setTab(t)} onExport={()=>setShowExport(true)} onSync={()=>setShowSync(true)}/>}
         {tab==="gst"         && <GSTTab       settings={settings} gstData={gstData} month={month} fy={fy} setPopover={setPopover}/>}
         {tab==="bookkeeping" && <BKTab        settings={settings} bkData={bkData} mk={mk} month={month} setPopover={setPopover}/>}
         {tab==="settings"    && <SettingsPanel  settings={settings} onSave={fbSaveSettings}/>}
       </div>
       {popover&&<Popover {...popover} teamMembers={settings.teamMembers} onClose={closePopover}/>}
       {showExport&&<ExportModal settings={settings} gstData={gstData} bkData={bkData} onClose={()=>setShowExport(false)}/>}
+      {showSync&&<SyncModal onClose={()=>setShowSync(false)}/>}
       {idleWarning&&(
         <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",zIndex:9999,background:"#1E3A5F",color:"white",borderRadius:12,padding:"14px 24px",boxShadow:"0 8px 32px rgba(0,0,0,0.3)",display:"flex",alignItems:"center",gap:16,fontSize:13,whiteSpace:"nowrap"}}>
           <span>You will be signed out in <strong>1 minute</strong> due to inactivity.</span>
